@@ -8,7 +8,6 @@ Standalone recreation of the Week 1 notebook exercises as plain Python scripts.
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env  # then fill in OPENAI_API_KEY
 ```
 
 ## Scripts
