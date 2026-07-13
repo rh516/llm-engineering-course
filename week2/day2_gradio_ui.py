@@ -57,6 +57,7 @@ def build_shout_ui():
 def build_gpt_ui():
     message_input = gr.Textbox(label="Your message:", info="Enter a message for GPT-4.1-mini", lines=7)
     message_output = gr.Markdown(label="Response:")
+
     return gr.Interface(
         fn=stream_gpt,
         title="GPT",
@@ -75,6 +76,7 @@ def build_brochure_ui():
     url_input = gr.Textbox(label="Landing page URL including http:// or https://")
     model_selector = gr.Dropdown(["GPT"], label="Select model", value="GPT")
     message_output = gr.Markdown(label="Response:")
+
     return gr.Interface(
         fn=stream_brochure,
         title="Brochure Generator",
@@ -107,4 +109,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
