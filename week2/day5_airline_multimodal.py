@@ -1,15 +1,20 @@
 """
-Day 4: Project - Airline AI Assistant.
+Day 5: Multimodal Airline AI Assistant.
 
-A customer support chatbot for "FlightAI" that uses LLM tool-calling to look
-up ticket prices from a small SQLite database.
+Extends day4's tool-calling airline assistant with:
+- Image generation of the destination city (gpt-image-1-mini)
+- Text-to-speech playback of the assistant's reply (gpt-4o-mini-tts)
+- A custom Gradio Blocks UI combining chat, image and audio panels
 """
 
 import os
 import json
 import sqlite3
+import base64
+from io import BytesIO
 from dotenv import load_dotenv
 from openai import OpenAI
+from PIL import Image
 import gradio as gr
 
 load_dotenv(override=True)
@@ -41,24 +46,7 @@ price_function = {
     },
 }
 
-set_price_function = {
-    "name": "set_ticket_price",
-    "description": "Set (or update) the price of a return ticket to the destination city.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "city": {"type": "string", "description": "The destination city"},
-            "price": {"type": "number", "description": "The new ticket price in dollars"},
-        },
-        "required": ["city", "price"],
-        "additionalProperties": False,
-    },
-}
-
-tools = [
-    {"type": "function", "function": price_function},
-    {"type": "function", "function": set_price_function},
-]
+tools = [{"type": "function", "function": price_function}]
 
 
 def init_db():
@@ -70,11 +58,7 @@ def init_db():
         if cursor.fetchone()[0] == 0:
             defaults = {"london": 799, "paris": 899, "tokyo": 1420, "berlin": 499, "sydney": 2999}
             for city, price in defaults.items():
-                cursor.execute(
-                    "INSERT INTO prices (city, price) VALUES (?, ?) "
-                    "ON CONFLICT(city) DO UPDATE SET price = excluded.price",
-                    (city, price),
-                )
+                cursor.execute("INSERT INTO prices (city, price) VALUES (?, ?)", (city, price))
             conn.commit()
 
 
@@ -87,46 +71,80 @@ def get_ticket_price(city):
         return f"Ticket price to {city} is ${result[0]}" if result else "No price data available for this city"
 
 
-def set_ticket_price(city, price):
-    print(f"DATABASE TOOL CALLED: Setting price for {city} to ${price}", flush=True)
-    with sqlite3.connect(DB) as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO prices (city, price) VALUES (?, ?) "
-            "ON CONFLICT(city) DO UPDATE SET price = ?",
-            (city.lower(), price, price),
-        )
-        conn.commit()
-    return f"Ticket price to {city} has been set to ${price}"
-
-
-def handle_tool_calls(message):
+def handle_tool_calls_and_return_cities(message):
     responses = []
+    cities = []
     for tool_call in message.tool_calls:
-        arguments = json.loads(tool_call.function.arguments)
         if tool_call.function.name == "get_ticket_price":
-            content = get_ticket_price(arguments.get("destination_city"))
-        elif tool_call.function.name == "set_ticket_price":
-            content = set_ticket_price(arguments.get("city"), arguments.get("price"))
-        else:
-            content = "Unknown tool"
-        responses.append({ "role": "tool", "content": content, "tool_call_id": tool_call.id})
-    return responses
+            arguments = json.loads(tool_call.function.arguments)
+            city = arguments.get("destination_city")
+            cities.append(city)
+            price_details = get_ticket_price(city)
+            responses.append({"role": "tool", "content": price_details, "tool_call_id": tool_call.id})
+    return responses, cities
 
 
-def chat(message, history):
+def artist(city):
+    image_response = openai.images.generate(
+        model="gpt-image-1-mini",
+        prompt=f"An image representing a vacation in {city}, showing tourist spots and everything unique about {city}, in a vibrant pop-art style",
+        size="1024x1024",
+        n=1,
+    )
+    image_base64 = image_response.data[0].b64_json
+    image_data = base64.b64decode(image_base64)
+    return Image.open(BytesIO(image_data))
+
+
+def talker(message):
+    response = openai.audio.speech.create(model="gpt-4o-mini-tts", voice="onyx", input=message)
+    return response.content
+
+
+def chat(history):
     history = [{"role": h["role"], "content": h["content"]} for h in history]
-    messages = [{"role": "system", "content": system_message}] + history + [{"role": "user", "content": message}]
+    messages = [{"role": "system", "content": system_message}] + history
     response = openai.chat.completions.create(model=MODEL, messages=messages, tools=tools)
+    cities = []
+    image = None
 
     while response.choices[0].finish_reason == "tool_calls":
-        tool_message = response.choices[0].message
-        responses = handle_tool_calls(tool_message)
-        messages.append(tool_message)
+        message = response.choices[0].message
+        responses, cities = handle_tool_calls_and_return_cities(message)
+        messages.append(message)
         messages.extend(responses)
         response = openai.chat.completions.create(model=MODEL, messages=messages, tools=tools)
 
-    return response.choices[0].message.content
+    reply = response.choices[0].message.content
+    history += [{"role": "assistant", "content": reply}]
+
+    voice = talker(reply)
+
+    if cities:
+        image = artist(cities[0])
+
+    return history, voice, image
+
+
+def put_message_in_chatbot(message, history):
+    return "", history + [{"role": "user", "content": message}]
+
+
+def build_ui():
+    with gr.Blocks() as ui:
+        with gr.Row():
+            chatbot = gr.Chatbot(height=500, type="messages")
+            image_output = gr.Image(height=500, interactive=False)
+        with gr.Row():
+            audio_output = gr.Audio(autoplay=True)
+        with gr.Row():
+            message = gr.Textbox(label="Chat with our AI Assistant:")
+
+        message.submit(
+            put_message_in_chatbot, inputs=[message, chatbot], outputs=[message, chatbot]
+        ).then(chat, inputs=chatbot, outputs=[chatbot, audio_output, image_output])
+
+    return ui
 
 
 def main():
@@ -135,7 +153,7 @@ def main():
         return
 
     init_db()
-    gr.ChatInterface(fn=chat, type="messages").launch()
+    build_ui().launch(inbrowser=True, auth=("ed", "bananas"))
 
 
 if __name__ == "__main__":
