@@ -1,0 +1,22 @@
+openai>=1.109.1
+python-dotenv>=1.1.1
+gradio>=5.47.2,<6.0
+pydantic>=2.9
+# pinned: newer releases require building a Rust extension with no prebuilt wheel on some platforms
+litellm==1.79.1
+chromadb>=1.1.0
+tqdm>=4.67.1
+tiktoken>=0.11.0
+numpy>=2.3.3
+pandas>=2.3.3
+plotly>=6.3.0
+scikit-learn>=1.7.2
+sentence-transformers>=5.1.1
+tenacity>=9.0.0
+langchain>=0.3.27
+langchain-core>=0.3.76
+langchain-openai>=0.3.33
+langchain-chroma>=0.2.6
+langchain-community>=0.3.30
+langchain-text-splitters>=0.3.11
+langchain-huggingface>=1.0.0
